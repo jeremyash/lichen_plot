@@ -26,62 +26,6 @@ library(cowplot)
 ## functions
 #############################################################################
 
-shift_legend <- function(p){
-  
-  # check if p is a valid object
-  if(!"gtable" %in% class(p)){
-    if("ggplot" %in% class(p)){
-      gp <- ggplotGrob(p) # convert to grob
-    } else {
-      message("This is neither a ggplot object nor a grob generated from ggplotGrob. Returning original plot.")
-      return(p)
-    }
-  } else {
-    gp <- p
-  }
-  
-  # check for unfilled facet panels
-  facet.panels <- grep("^panel", gp[["layout"]][["name"]])
-  empty.facet.panels <- sapply(facet.panels, function(i) "zeroGrob" %in% class(gp[["grobs"]][[i]]))
-  empty.facet.panels <- facet.panels[empty.facet.panels]
-  if(length(empty.facet.panels) == 0){
-    message("There are no unfilled facet panels to shift legend into. Returning original plot.")
-    return(p)
-  }
-  
-  # establish extent of unfilled facet panels (including any axis cells in between)
-  empty.facet.panels <- gp[["layout"]][empty.facet.panels, ]
-  empty.facet.panels <- list(min(empty.facet.panels[["t"]]), min(empty.facet.panels[["l"]]),
-                             max(empty.facet.panels[["b"]]), max(empty.facet.panels[["r"]]))
-  names(empty.facet.panels) <- c("t", "l", "b", "r")
-  
-  # extract legend & copy over to location of unfilled facet panels
-  guide.grob <- which(gp[["layout"]][["name"]] == "guide-box")
-  if(length(guide.grob) == 0){
-    message("There is no legend present. Returning original plot.")
-    return(p)
-  }
-  gp <- gtable_add_grob(x = gp,
-                        grobs = gp[["grobs"]][[guide.grob]],
-                        t = empty.facet.panels[["t"]],
-                        l = empty.facet.panels[["l"]],
-                        b = empty.facet.panels[["b"]],
-                        r = empty.facet.panels[["r"]],
-                        name = "new-guide-box")
-  
-  # squash the original guide box's row / column (whichever applicable)
-  # & empty its cell
-  guide.grob <- gp[["layout"]][guide.grob, ]
-  if(guide.grob[["l"]] == guide.grob[["r"]]){
-    gp <- gtable_squash_cols(gp, cols = guide.grob[["l"]])
-  }
-  if(guide.grob[["t"]] == guide.grob[["b"]]){
-    gp <- gtable_squash_rows(gp, rows = guide.grob[["t"]])
-  }
-  gp <- gtable_remove_grobs(gp, "guide-box")
-  
-  return(gp)
-}
 
 #############################################################################
 ## load data
@@ -106,17 +50,18 @@ lichen_s <- read_excel("raw_data/Case Study lichens sensitivity_02082019.xlsx",
                        sheet = "Unit Level S")
 
 lichen <- bind_rows(lichen_n, lichen_s) %>% 
-  rename(resp_max = Max, resp_80 = "80+", resp_50 = "50+", resp_10 = "10+") %>% 
+  rename(resp_max = Max, resp_80 = "80+", resp_50 = "50+", resp_10 = "10+", sens_gr = Sensitivity, func_gr = "Fxl Gp1") %>% 
   mutate(plot_max = resp_max, 
          plot_80 = resp_80 - resp_max, 
          plot_50 = resp_50 - resp_80, 
          plot_10 = resp_10 - resp_50) %>% 
   gather(response_class, response_val, c(plot_max:plot_10)) %>% 
-  mutate(response_class = factor(response_class, levels = rev(c("plot_max", "plot_80", "plot_50", "plot_10")))) %>% 
+  mutate(response_class = factor(response_class, levels = rev(c("plot_max", "plot_80", "plot_50", "plot_10")))) %>%
+  mutate(func_gr = factor(func_gr, levels = c("Cya", "For", "Mtx"), labels = c("Cyano Lichen", "Forage Lichen", "Matrix Lichen"))) %>% 
   rename(N_S = "N/S") %>% 
   rename(sci_name = SciName19chklst)
 
-colnames(n_dep_range)
+
 
 
 n_dep_range <- read_excel("raw_data/All Case Study Deposition Range.xlsx") %>% 
@@ -131,7 +76,7 @@ n_dep_range <- read_excel("raw_data/All Case Study Deposition Range.xlsx") %>%
           )
 
 #############################################################################
-## plotting
+## plotting by trophic/sensitivity group or functional group
 #############################################################################
 
 # response colors
@@ -143,25 +88,26 @@ resp_cols <- c(viridis(3), "gray65")
 ## Nitrogen
 ##-------------
 
-n_plot <- function(UNIT) {
+n_plot <- function(UNIT, GROUP) {
+  
   # subset to N data
-  dat_n <- lichen %>% 
-    filter(CaseUnitNFPW == UNIT) %>% 
-    filter(N_S == "N") %>% 
-    mutate(Sensitivity = factor(str_to_title(Sensitivity),  levels = c("Oligotroph", "Mesotroph", "Eutroph")))
-  
+  dat_n <- lichen %>%
+    filter(CaseUnitNFPW == UNIT) %>%
+    filter(N_S == "N") %>%
+    mutate(sens_gr = factor(str_to_title(sens_gr),  levels = c("Oligotroph", "Mesotroph", "Eutroph")))
+
   # plotting order by minimum Max CL
-  max_order <- dat_n %>% 
-    filter(response_class == "plot_max") %>% 
-    arrange(response_val) %>% 
+  max_order <- dat_n %>%
+    filter(response_class == "plot_max") %>%
+    arrange(response_val) %>%
     pull(sci_name)
-    dat_n$sci_name <- factor(dat_n$sci_name, levels = rev(max_order))
-    
+  dat_n$sci_name <- factor(dat_n$sci_name, levels = rev(max_order))
+
   # get N deposition limits
-    n_lims <- n_dep_range %>% 
-      filter(UNIT_NAME == UNIT) 
-  
-  
+  n_lims <- n_dep_range %>%
+    filter(UNIT_NAME == UNIT)
+
+
   # plot -- N deposition
   ggplot(aes(x = sci_name, y = response_val, fill = response_class), data = dat_n) +
     geom_bar(stat = "identity", width = 0.6) +
@@ -169,17 +115,16 @@ n_plot <- function(UNIT) {
                       name = "Decrease in Detection Rate",
                       breaks = c("plot_max", "plot_80", "plot_50", "plot_10"),
                       labels = c("No Change",
-                                 "0-20%",
-                                 "20-50%",
-                                 "50-90%")
-    ) +
+                                 "Low Risk",
+                                 "Moderate Risk",
+                                 "High Risk")) +
     coord_flip() +
-    facet_wrap(~Sensitivity, ncol = 2, scales = "free")  +
+    facet_wrap(reformulate(GROUP), ncol = 2, scales = "free")  +
     labs(x = NULL,
          y = expression(paste("N deposition (kg N ", ha^-1, yr^-1, ")", sep = " ")),
          title = paste(UNIT, " - N Response", sep = "")) +
-    geom_hline(aes(yintercept = TDEP_MIN, linetype = "N Deposition limits"), show.legend = TRUE, data = n_lims) +
-    geom_hline(yintercept = n_lims$TDEP_MAX, linetype = "dashed") +
+    geom_hline(aes(yintercept = CMAQ_MIN, linetype = "N Deposition limits"), show.legend = TRUE, data = n_lims) +
+    geom_hline(yintercept = n_lims$CMAQ_MAX, linetype = "dashed") +
     scale_linetype_manual(name = NULL, labels = "N Deposition Limits", values = "dashed") +
     theme_minimal() +
     theme(legend.position = c(0.75, 0.25),
@@ -206,27 +151,30 @@ n_plot <- function(UNIT) {
                        minor_breaks = seq(0,17,1))
 
 
-  ggsave(paste("figures/", UNIT, "_N.pdf", sep = ""),
+  ggsave(paste("figures/", str_replace_all(UNIT, " ", "_"), "_N_", paste(GROUP), ".pdf", sep = ""),
          width = 8,
          height = 10,
          units = "in")
 }
 
 
-n_plot("Superior National Forest")
-n_plot("Bridger-Teton National Forest")
+n_plot("Superior National Forest", 'func_gr')
+n_plot("Superior National Forest", 'sens_gr')
+
+n_plot("Bridger-Teton National Forest", 'func_gr')
+n_plot("Bridger-Teton National Forest", 'sens_gr')
 
 
 ##-------------
 ## Sulfur
 ##-------------
 
-s_plot <- function(UNIT) {
+s_plot <- function(UNIT, GROUP) {
   # subset to S data
   dat_s <- lichen %>% 
     filter(CaseUnitNFPW == UNIT) %>% 
     filter(N_S == "S") %>% 
-    mutate(Sensitivity = factor(str_to_title(Sensitivity),  levels = c("Sensitive", "Intermediate", "Tolerant")))
+    mutate(sens_gr = factor(str_to_title(sens_gr), levels = c("Sensitive", "Intermediate", "Tolerant")))
   
   # plotting order by minimum Max CL
   max_order <- dat_s %>% 
@@ -252,7 +200,7 @@ s_plot <- function(UNIT) {
                                  "50-90%")
     ) +
     coord_flip() +
-    facet_wrap(~Sensitivity, ncol = 2, scales = "free")  +
+    facet_wrap(reformulate(GROUP), ncol = 2, scales = "free")  +
     labs(x = NULL,
          y = expression(paste("S deposition (kg S ", ha^-1, yr^-1, ")", sep = " ")),
          title = paste(UNIT, " - S Response", sep = "")) +
@@ -284,15 +232,21 @@ s_plot <- function(UNIT) {
                        minor_breaks = seq(0,30,1)) 
   
   
-  ggsave(paste("figures/", UNIT, "_S.pdf", sep = ""),
+  ggsave(paste("figures/", str_replace_all(UNIT, " ", "_"), "_S_", paste(GROUP), ".pdf", sep = ""),
          width = 8,
          height = 10,
          units = "in")
 }
 
 
-s_plot("Superior National Forest")
-s_plot("Bridger-Teton National Forest")
+s_plot("Superior National Forest", 'func_gr')
+s_plot("Superior National Forest", 'sens_gr')
+
+s_plot("Bridger-Teton National Forest", 'func_gr')
+s_plot("Bridger-Teton National Forest", 'sens_gr')
+
+#----------------------------------------------------------------------------
+
 
 #----------------------------------------------------------------------------
 #----------------------------------------------------------------------------
