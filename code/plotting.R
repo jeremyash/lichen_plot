@@ -195,10 +195,9 @@ s_plot <- function(UNIT, GROUP) {
                       name = "Decrease in Detection Rate",
                       breaks = c("plot_max", "plot_80", "plot_50", "plot_10"),
                       labels = c("No Change",
-                                 "0-20%",
-                                 "20-50%",
-                                 "50-90%")
-    ) +
+                                 "Low Risk",
+                                 "Moderate Risk",
+                                 "High Risk")) +
     coord_flip() +
     facet_wrap(reformulate(GROUP), ncol = 2, scales = "free")  +
     labs(x = NULL,
